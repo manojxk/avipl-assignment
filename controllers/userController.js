@@ -18,76 +18,6 @@ const transporter = nodemailer.createTransport(
 // @desc    Register new user
 // @route   POST /api/users
 // @access  Public
-const confirmEmail = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
-
-  if (!name || !email || !password) {
-    res.status(400);
-    throw new Error("Please add all fields");
-  }
-
-  // Check if user exists
-  const userExists = await User.findOne({ email });
-
-  if (userExists) {
-    res.status(400);
-    throw new Error("User already exists");
-  }
-
-  // Hash password
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
-
-  // Create user
-  const user = await User.create({
-    name,
-    email,
-    password: hashedPassword,
-  });
-
-  if (user) {
-    const token = await Token.create({
-      _userId: user._id,
-      token: crypto.randomBytes(16).toString("hex"),
-    });
-
-    let mailOptions = {
-      from: "sdemanojkumar@gmail.com",
-      to: user.email,
-      subject: "Account Verification Link",
-      text:
-        "Hello " +
-        req.body.name +
-        ",\n\n" +
-        "Please verify your account by clicking the link: \nhttp://" +
-        req.headers.host +
-        "/confirmation/" +
-        user.email +
-        "/" +
-        token.token +
-        "\n\nThank You!\n",
-    };
-
-    transporter.sendMail(mailOptions, function (err) {
-      if (err) {
-        return res.status(500).send({
-          msg: "Technical Issue!, Please click on resend for verify your Email.",
-        });
-      }
-      return res
-        .status(200)
-        .send(
-          "A verification email has been sent to " +
-            user.email +
-            ". It will be expire after one day."
-        );
-    });
-  } else {
-    res.status(400);
-    throw new Error("Try again");
-  }
-});
-
 const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -131,7 +61,7 @@ const registerUser = asyncHandler(async (req, res) => {
         ",\n\n" +
         "Please verify your account by clicking the link: \nhttp://" +
         req.headers.host +
-        "/confirmation/" +
+        "/api/users/confirmation/" +
         user.email +
         "/" +
         token.token +
@@ -157,6 +87,57 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new Error("Try again");
   }
 });
+
+// @desc    Confirm user email
+// @route   POST /confirmation/:email/:token
+// @access  Public
+const confirmEmail = function (req, res, next) {
+  Token.findOne({ token: req.params.token }, function (err, token) {
+    // token is not found into database i.e. token may have expired
+    if (!token) {
+      return res.status(400).send({
+        msg: "Your verification link may have expired. Please click on resend for verify your Email.",
+      });
+    }
+    // if token is found then check valid user
+    else {
+      User.findOne(
+        { _id: token._userId, email: req.params.email },
+        function (err, user) {
+          // not valid user
+          if (!user) {
+            return res.status(401).send({
+              msg: "We were unable to find a user for this verification. Please SignUp!",
+            });
+          }
+          // user is already verified
+          else if (user.isVerified) {
+            return res
+              .status(200)
+              .send("User has been already verified. Please Login");
+          }
+          // verify user
+          else {
+            // change isVerified to true
+            user.isVerified = true;
+            user.save(function (err) {
+              // error occur
+              if (err) {
+                return res.status(500).send({ msg: err.message });
+              }
+              // account successfully verified
+              else {
+                return res
+                  .status(200)
+                  .send("Your account has been successfully verified");
+              }
+            });
+          }
+        }
+      );
+    }
+  });
+};
 
 // @desc    Authenticate a user
 // @route   POST /api/users/login
@@ -185,6 +166,9 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Reset/forgot password mail
+// @route   POST /reset
+// @access  Public
 const resetPasswordMail = asyncHandler(async (req, res) => {
   crypto.randomBytes(32, (err, buffer) => {
     if (err) {
@@ -215,6 +199,9 @@ const resetPasswordMail = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Reset/forgot password
+// @route   POST /reset/:token
+// @access  Public
 const resetPassword = asyncHandler(async (req, res) => {
   const newPassword = req.body.password;
   const sentToken = req.params.token;
@@ -249,4 +236,5 @@ module.exports = {
   loginUser,
   resetPasswordMail,
   resetPassword,
+  confirmEmail,
 };
